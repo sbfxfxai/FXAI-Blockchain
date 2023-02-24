@@ -1,0 +1,33 @@
+# Create a new DAO
+dao = FXAIDAO()
+
+# Register members
+dao.register_member('Alice')
+dao.register_member('Bob')
+dao.register_member('Charlie')
+
+# Create a proposal to add a new member
+dao.create_proposal(0, 'members', ['Dave'])
+
+# Members vote on the proposal
+dao.vote_on_proposal(0, 'Alice')
+dao.vote_on_proposal(0, 'Bob')
+
+# Finalize the proposal
+dao.finalize_proposal(0)
+
+# Verify that the new member was added
+assert 'Dave' in dao.members
+
+# Create a proposal to remove a member
+dao.create_proposal(1, 'members', ['Charlie'])
+
+# Members vote on the proposal
+dao.vote_on_proposal(1, 'Alice')
+dao.vote_on_proposal(1, 'Bob')
+
+# Finalize the proposal
+dao.finalize_proposal(1)
+
+# Verify that the member was removed
+assert 'Charlie' not in dao.members
