@@ -31,3 +31,7 @@ dao.finalize_proposal(1)
 
 # Verify that the member was removed
 assert 'Charlie' not in dao.members
+
+dao = FXAIDAO()
+dao.register_member('Ohene')
+print(dao.members)
