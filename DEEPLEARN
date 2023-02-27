@@ -1,0 +1,260 @@
+import oandapyV20
+import oandapyV20.endpoints.orders as orders
+import oandapyV20.endpoints.pricing as pricing
+import time
+import random
+import numpy as np
+import matplotlib.pyplot as plt
+# Define hyperparameters
+n = 10  # number of previous mid prices to include in the state
+epsilon = 0.1  # probability of taking a random action
+gamma = 0.9  # discount factor
+alpha = 0.1  # learning rate
+y_threshold = 0.5  # the threshold for determining the optimal trade size
+episode=0
+# Define the action space
+actions = ['buy', 'sell', 'hold']
+action_space = len(actions)
+client = oandapyV20.API(environment='live',
+                                access_token='8d59dc32490c0e3caaf3158584aed1f1-375716c27782bc684c8c0ca3badc1e92')
+account_id = "001-001-2284731-001"
+# Define the Q-table
+# Define the Q-table as a dictionary of dictionaries
+
+q_table = {}
+fx_pairs = ['EUR_USD', 'EUR_CAD', 'NZD_USD', 'AUD_JPY', 'GBP_JPY', 'GBP_AUD', 'GBP_NZD', 'EUR_NZD',
+            'EUR_AUD', 'NZD_CHF', 'NZD_CAD', 'AUD_CAD', 'AUD_CHF', 'EUR_GBP', 'GBP_CHF', 'GBP_CAD',
+            'NZD_JPY', 'CHF_JPY', 'CAD_JPY', 'AUD_USD', 'USD_JPY', 'CAD_CHF', 'GBP_USD', 'AUD_NZD',
+            'USD_CHF', 'USD_CAD', 'EUR_JPY']
+
+# Define the function to plot the rewards over the course of the algorithm
+def plot_rewards(rewards):
+    plt.plot(rewards)
+    plt.xlabel('Episode')
+    plt.ylabel('Reward')
+    plt.title('Rewards over Episodes')
+    plt.show()
+
+
+
+
+
+
+# Define the function to run the Q-learning algorithm for a given number of episodes
+def run_algorithm(num_episodes):
+    rewards = []
+    for episode in range(num_episodes):
+        # get the prices for the currency pairs
+        prices = get_prices()
+
+        # choose an action based on the current state and the epsilon-greedy policy
+        state = get_state(prices)
+        if np.random.uniform(0, 1) < epsilon:
+            action = np.random.choice(range(action_space))
+        else:
+            q_values = [get_q_value(state, a) for a in range(action_space)]
+            action = np.argmax(q_values)
+        try:    
+        # take the chosen action and get the next state and reward
+            next_state, reward = get_next_state_reward(action, prices)
+        except Exception:
+            pass
+        # update the Q-value for the current state-action pair
+        reward = 0
+        current_q = get_q_value(state, action)
+        try:
+            next_state, reward = get_next_state_reward(action, prices)
+        except Exception:
+            pass
+        next_q_values = [get_q_value(next_state, a) for a in range(action_space)]
+        max_next_q = max(next_q_values)
+        new_q = current_q + alpha * (reward + gamma * max_next_q - current_q)
+        q_table[state][action] = new_q
+
+        # record the reward for the episode
+        rewards.append(reward)
+
+    # plot the rewards over the course of the algorithm
+    plot_rewards(rewards)
+
+# Define the function to get the next state and reward based on the action taken
+def get_next_state_reward(action, prices):
+    # get the current state and price of the currency pair to trade
+    state = get_state(prices)
+    price = prices[0, 0]  # use the bid price to sell, or the mid price to buy or hold
+
+    # determine the size and direction of the position to take based on the action
+    if action == 0:  # buy
+        direction = 'buy'
+        price = prices[0, 1]  # use the mid price to buy
+    elif action == 1:  # sell
+        direction = 'sell'
+        price = prices[0, 0]  # use the bid price to sell
+    else:  # hold
+        direction = None
+
+    # calculate the optimal trade size based on the Q-values
+    if action == 0 or action ==1:
+        q_values = [get_q_value(state, a) for a in range(action_space)]
+        trade_size = calculate_trade_size(q_values)
+    else:
+        trade_size = round(ran,0)
+
+    # initialize reward with a default value
+    reward = 0
+
+    # submit the order and get the profit or loss
+    if trade_size <101:
+        client = oandapyV20.API(environment='live',
+                                access_token='8d59dc32490c0e3caaf3158584aed1f1-375716c27782bc684c8c0ca3badc1e92')
+        account_id = "001-001-2284731-001"
+        instrument = random.choice(fx_pairs)
+        data = {
+    "order": {
+        "instrument": instrument,
+        "units": str(trade_size),
+        "type": "MARKET",
+        "positionFill": "DEFAULT",
+        "side": direction
+    }
+}
+
+        print(data)
+        try:
+            r = orders.OrderCreate(accountID=account_id, data=data)
+            client.request(r)
+        except Exception:
+            pass
+        time.sleep(1)  # wait for the order to be processed
+        try:
+            r = orders.OrderDetails(accountID=account_id, orderID=r.response['orderCreateTransaction']['id'])
+            order_response = client.request(r)
+        except Exception:
+            pass
+        
+        try:
+            if 'price' in order_response['order'].keys():
+                order_price = float(order_response['order']['price'])
+                profit_loss = (price - order_price) * trade_size if direction == 'sell' else (order_price - price) * trade_size
+                reward = calculate_reward(direction, profit_loss)
+        except Exception:
+            pass
+        else:
+            reward = 0
+        
+
+    # get the next state based on the current state and action taken
+    next_state = get_state(prices)
+
+    return next_state, reward
+
+
+
+
+
+# define the function to get the Q-value for a given state-action pair
+def get_q_value(state, action):
+    # if the state is not already in the Q-table, add it with initial values of 0 for each action
+    if state not in q_table:
+        q_table[state] = [0.0] * action_space
+    # return the Q-value for the given state-action pair
+    return q_table[state][action]
+
+# Define the function to get the current state
+def get_state(prices):
+    mid_prices = prices[:, 1]
+    state = tuple(mid_prices[-n:])
+    return state
+# Define global variables to store the prices and last update time
+prices = None
+last_update = None
+# Define the function to get the bid and mid prices for each currency pair
+# Define the function to get the bid and mid prices for each currency pair
+def get_prices():
+    client = oandapyV20.API(environment='live',
+                            access_token='8d59dc32490c0e3caaf3158584aed1f1-375716c27782bc684c8c0ca3badc1e92')
+    account_id = "001-001-2284731-001"
+    fx_pairs = ['EUR_USD', 'EUR_CAD', 'NZD_USD', 'AUD_JPY', 'GBP_JPY', 'GBP_AUD', 'GBP_NZD', 'EUR_NZD',
+                'EUR_AUD', 'NZD_CHF', 'NZD_CAD', 'AUD_CAD', 'AUD_CHF', 'EUR_GBP', 'GBP_CHF', 'GBP_CAD',
+                'NZD_JPY', 'CHF_JPY', 'CAD_JPY', 'AUD_USD', 'USD_JPY', 'CAD_CHF', 'GBP_USD', 'AUD_NZD',
+                'USD_CHF', 'USD_CAD', 'EUR_JPY']
+    params = {
+        "instruments": ",".join(fx_pairs)
+    }
+    r = pricing.PricingInfo(accountID=account_id, params=params)
+    response = client.request(r)
+    prices = np.zeros((len(fx_pairs), 3))
+    for i, instrument in enumerate(response.get("prices", [])):
+        if "bids" in instrument and "asks" in instrument:
+            prices[i, 0] = float(instrument["bids"][0]["price"])
+            prices[i, 1] = round((float(instrument["bids"][0]["price"]) + float(instrument["asks"][0]["price"])) / 2, 5)
+    return prices
+
+
+# Define the function to calculate the optimal trade size based on the Q-values
+
+
+def calculate_trade_size(q_values):
+    max_q_value = max(q_values)
+    return (
+        round((max_q_value - y_threshold) / (1 - y_threshold) * 10000)
+        if max_q_value > y_threshold
+        else ran
+    )
+
+
+# Define the function to calculate the reward
+def calculate_reward(position, profit_loss):
+    if position == 'buy':
+        return profit_loss
+    elif position == 'sell':
+        return -profit_loss
+    else:
+        return 0
+# Main loop for Q-learning algorithm
+while True:
+    
+    for i in range(action_space):
+        q_table[i] = {}
+    for j in range(n):
+        q_table[i][j] = 0.0
+
+    ran=random.uniform(10.0,25.0)
+    ran=round(ran,0)
+    run_algorithm(10)
+    time.sleep(1)
+    episode=episode+1
+    # get the prices for the currency pairs
+    prices = get_prices()
+
+    # choose an action based on the current state and the epsilon-greedy policy
+    state = get_state(prices)
+    if np.random.uniform(0, 1) < epsilon:
+        action = np.random.choice(range(action_space))
+    else:
+        q_values = [get_q_value(state, a) for a in range(action_space)]
+        action = np.argmax(q_values)
+
+    # take the chosen action and get the next state and reward
+    next_state, reward = get_next_state_reward(action, prices)
+
+    # update the Q-value for the current state-action pair
+    current_q = get_q_value(state, action)
+    next_q_values = [get_q_value(next_state, a) for a in range(action_space)]
+    max_next_q = max(next_q_values)
+    new_q = current_q + alpha * (reward + gamma * max_next_q - current_q)
+    q_table[state][action] = new_q
+    
+    
+    
+    
+    
+    # print the episode number, the action taken, and the Q-values for the current state
+    print('Episode:', episode)
+    print('Action:', actions[action])
+    print('Q-values:', q_table[state])
+    print('Reward:', reward)
+    print('Current State:', state)
+    print('Next State:', next_state)
+    print('------------------------')
+    continue
