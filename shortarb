@@ -1,0 +1,72 @@
+import time
+import random
+import oandapyV20
+import oandapyV20.endpoints.orders as orders
+import oandapyV20.endpoints.pricing as pricing
+import oandapyV20.endpoints.trades as trades
+from oandapyV20.exceptions import V20Error
+
+# set up your Oanda API v20 account credentials for live trading
+account_id = "001-001-2284731-001"
+access_token = "8d59dc32490c0e3caaf3158584aed1f1-375716c27782bc684c8c0ca3badc1e92"
+
+# set up the currency pairs and pivot levels you want to trade
+pairs = ["EUR_USD", "USD_CAD"]
+pivot_levels = {"R1": 0.382, "R2": 0.618, "R3": 1.0}
+
+# set up the API client for live trading
+api = oandapyV20.API(access_token=access_token, environment="live")
+
+# set up the initial trade size and reinforcement learning parameters
+units = 1000
+gamma = 0.9
+alpha = 0.5
+
+# loop continuously to place sell limit orders
+while True:
+    for pair in pairs:
+        # get the current market price for the currency pair
+        pricing_request = pricing.PricingInfo( accountID=account_id,params={"instruments": pair})
+        pricing_response = api.request(pricing_request)
+        price = float(pricing_response["prices"][0]["asks"][0]["price"])
+
+        # randomly select a pivot level and calculate the pivot price
+        level = random.choice(list(pivot_levels.keys()))
+        value = pivot_levels[level]
+        pivot_price = round(price + value * (price - price * 0.5), 5) # round to 5 decimal places
+
+        # place a sell limit order at the ask price for the pivot level
+        limit_order_request = orders.OrderCreate(
+            accountID=account_id,
+            data={
+                "order": {
+                    "instrument": pair,
+                    "units": str(units), # use the current trade size
+                    "price": str(pivot_price),
+                    "type": "LIMIT",
+                    "timeInForce": "GTC",
+                    "positionFill": "DEFAULT"
+                }
+            }
+        )
+        try:
+            response = api.request(limit_order_request)
+            print("Sell limit order placed for", pair, level, "at", pivot_price)
+        except V20Error as e:
+            print("Error placing sell limit order:", e)
+
+        # wait for the order to be filled
+        time.sleep(1)
+
+        # check the result of the trade and update the trade size accordingly
+        trade_request = trades.TradesList(accountID=account_id)
+        trade_response = api.request(trade_request)
+        trades_data = trade_response.get("trades", [])
+        if trades_data:
+	        trade = trades_data[-1]  # get the latest trade
+	        if int(trade["currentUnits"]) < 0:  # convert to integer before performing the comparison
+		        profit = float(trade["unrealizedPL"])  # calculate the profit/loss of the trade
+		        units += int(alpha * profit / units)  # update the trade size using reinforcement learning
+
+        # wait for 10 seconds before placing more orders
+        time.sleep(10)
